@@ -1,12 +1,12 @@
 ---
 id: "@fsgtm/velocity-deal"
-version: 2.2.0
+version: 3.0.0
 title: Velocity deal
 description: A transactional or SMB deal one rep runs. Get a reply from the champion, show the fit, close. Short emails, a five-day quiet window, and no account map.
 author: { org: fsgtm, kind: agency }
-engines: { canon: "2" }
-contributes: deal.page
-permissions: { read: [deal, contact, account, observations, icps], slots: [deal.page], llm: owner, sources: [web_search, read_site] }
+engines: { canon: "3" }
+contributes: [deal.page, fields, templates.reports, templates.automations, scoring.lead]
+permissions: { read: [deal, contact, account, observations, icps], llm: owner, sources: [web_search, read_site] }
 ---
 
 # Velocity deal
@@ -19,6 +19,12 @@ words, and a deal closes once it reaches 40%. The page has no account map.
 This recipe is markdown only. Every rule below is one of Canon's built-ins,
 configured by the settings and the tables in this file, so it needs no build
 step and no code.
+
+Besides the deal page it ships the rest of the way of working, each piece
+turned on by itself on the Recipes page: four AI fields (three on the people
+at the account, one on the account's sales motion), a report of open deals
+by close quarter and stage, an automation that asks for the first touch on
+every new deal, and a lead scoring model tuned for small companies.
 
 ## Settings
 
@@ -613,8 +619,10 @@ angle: "How to open with them, tied to the alpha. A hypothesis."
 
 Research on the people at the account: what each one is trying to do, which
 systems they run, and what the seller's product would let them do that their
-current tools can't. The first three are contact AI fields, researched on the
-web and shared by every deal and the contacts list. Still at company rests on
+current tools can't. The first three are contact AI fields, this recipe's
+contributions to the `fields` point: researched on the web, shared by every
+deal and the contacts list, and turned on the first time people research runs
+unless someone turned one off on the Recipes page. Still at company rests on
 a quote. No page states a goal or the systems someone runs, so those two are
 `judgment` fields: a hypothesis with the sources it rests on. `replaces` lists
 earlier default questions, so a workspace still asking one moves to the
@@ -625,25 +633,61 @@ Someone research found has left the company gets neither. The keeper
 researches the deal's first `peopleResearchBuyers` ICP buyers once their last
 research is `peopleResearchEveryDays` old.
 
+The block's last field is about the account rather than its people: how the
+company sells. A velocity deal reads differently against a product-led
+company, where the buyer has often tried the product already, than against
+a sales-led one.
+
+```ai-fields
+- slug: still_at_company
+  label: Still at company
+  object: contact
+  kind: qa
+  answer: boolean
+  question: { setting: stillAtCompanyQuestion }
+  refresh: monthly
+  autoAccept: 0.8
+- slug: primary_goal
+  label: Primary goal
+  object: contact
+  kind: qa
+  answer: text
+  question: { setting: primaryGoalQuestion }
+  judgment: true
+  refresh: monthly
+  autoAccept: 0.8
+  replaces:
+    - "What is this person's primary goal at their current company? Research their tenure, team and remit. Cite sources naming the person; say unknown where evidence is missing."
+- slug: responsible_systems
+  label: Responsible systems
+  object: contact
+  kind: qa
+  answer: text
+  question: { setting: responsibleSystemsQuestion }
+  judgment: true
+  refresh: monthly
+  autoAccept: 0.8
+  replaces:
+    - "Which systems is this person likely responsible for at their current company? Research company job descriptions and public technology evidence such as BuiltWith, then match systems to the person's documented remit (for example Salesforce for RevOps). Distinguish confirmed ownership from inference; company usage alone does not prove personal responsibility. Cite sources and say unknown where unsupported."
+- slug: sales_motion
+  label: Sales motion
+  object: account
+  kind: classify
+  question: "How does this company sell: do buyers sign up and start on their own, does a sales team run the deal, or both? Ground it in the company's own site: a free plan, a free trial or self-serve pricing, against a 'contact sales' or 'book a demo' path and sales job postings."
+  options:
+    - { key: plg, label: PLG, description: "Buyers sign up and start without talking to anyone." }
+    - { key: sales-led, label: Sales-led, description: "A sales team runs every deal, from demo to contract." }
+    - { key: hybrid, label: Hybrid, description: "Self-serve for small teams, sales for larger ones." }
+  judgment: true
+  refresh: monthly
+  autoAccept: 0.8
+```
+
 ```people
 fields:
-  - { slug: still_at_company, label: Still at company, answer: boolean, question: { setting: stillAtCompanyQuestion }, role: employed }
-  - slug: primary_goal
-    label: Primary goal
-    answer: text
-    question: { setting: primaryGoalQuestion }
-    role: goal
-    judgment: true
-    replaces:
-      - "What is this person's primary goal at their current company? Research their tenure, team and remit. Cite sources naming the person; say unknown where evidence is missing."
-  - slug: responsible_systems
-    label: Responsible systems
-    answer: text
-    question: { setting: responsibleSystemsQuestion }
-    role: systems
-    judgment: true
-    replaces:
-      - "Which systems is this person likely responsible for at their current company? Research company job descriptions and public technology evidence such as BuiltWith, then match systems to the person's documented remit (for example Salesforce for RevOps). Distinguish confirmed ownership from inference; company usage alone does not prove personal responsibility. Cite sources and say unknown where unsupported."
+  - { slug: still_at_company, role: employed }
+  - { slug: primary_goal, role: goal }
+  - { slug: responsible_systems, role: systems }
 refresh: monthly
 everyDays: { setting: peopleResearchEveryDays }
 buyers: { setting: peopleResearchBuyers }
@@ -746,6 +790,55 @@ When it runs:
   they're on, with no drafting, and posts "replied, your move" to Slack.
 - When account research lands, it clears the keeper's call drafts, so the
   next check rewrites them with the open questions.
+
+## Reports and automations
+
+A velocity pipeline is read by when deals should close. This report installs
+shared, from the Recipes page:
+
+```template kind=report key=velocity_by_quarter_stage
+name: Velocity deals by close quarter and stage
+spec:
+  object: deal
+  filter: [{ field: isClosed, op: eq, value: false }]
+  groupBy: [{ field: closeDate, bucket: quarter }, { field: stage }]
+  measures: [{ fn: sum, field: amount }, { fn: count }]
+  chart: bar
+```
+
+A new deal gets its first touch the day it is made. The automation installs
+paused; resume it in Settings, Automations:
+
+```template kind=automation key=first_touch_today
+name: Send the first touch on new deals
+object: deal
+trigger: { kind: created }
+conditions: []
+actions:
+  - { kind: create_task, subject: "Send the champion a first touch today", dueInDays: 0, owner: { kind: record_owner } }
+```
+
+## Lead scoring {model=scoring.lead}
+
+Velocity sells to small companies, so a founder or a head of a team scores
+higher than a large account, and a lead that engages is hot sooner. A
+workspace's first lead scoring model starts with these rules. Greater than
+and less than include the value itself. A score runs from 0 to 100.
+
+| Setting | Kind | Default | Limits | Group | Label | Help |
+|---|---|---|---|---|---|---|
+| leadHot | int | 60 | 0 to 100 | Lead scoring | Hot from | |
+| leadWarm | int | 35 | 0 to 100 | Lead scoring | Warm from | Below it, cold. |
+| leadOwnerPoints | int | 5 | -100 to 100 | Lead scoring | Points for an owned lead | A lead earns these when it or its account has an owner. |
+
+| Field | Operator | Value | Points |
+|---|---|---|---|
+| title | contains | founder | 25 |
+| title | contains | head of | 20 |
+| title | contains | director | 10 |
+| employee_count | less_than | 200 | 15 |
+| employee_count | greater_than | 5000 | -10 |
+| engagement | greater_than | 1 | 25 |
 
 ## Evals
 

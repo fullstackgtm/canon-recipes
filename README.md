@@ -4,7 +4,7 @@ Recipes for [Canon](https://canoncrm.com). A recipe packages a way of working a 
 
 | Recipe | What it's for | Install source |
 |---|---|---|
-| [Velocity deal](velocity-deal/) | A transactional or SMB deal one rep runs: get a reply from the champion, show the fit, close. | `github:fullstackgtm/canon-recipes/velocity-deal@v2.0.0` |
+| [Velocity deal](velocity-deal/) | A transactional or SMB deal one rep runs. Ships a deal page, four AI fields, a report, a paused automation and a lead scoring model. | `github:fullstackgtm/canon-recipes/velocity-deal@v2.0.0` |
 
 ## Install one
 
